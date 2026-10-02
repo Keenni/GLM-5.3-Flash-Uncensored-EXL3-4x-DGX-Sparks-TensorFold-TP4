@@ -63,6 +63,12 @@ Known shape of the stack, so nobody is surprised:
 - **Decode is the strong side; prefill is the weak side** (~35% behind vLLM TP4 NVFP4 on the same ring).
 - **Decode throughput under concurrency falls off faster than our vLLM stack** — fine for 1–2 interactive
   streams, not the right tool for throughput farming.
+- **Prefix cache warms up late in real agent traffic**: the first 2–3 turns of a conversation don't hit it;
+  hits start around the third turn. Not a pool-size issue — an 8M-token pool behaves the same (details in
+  the [dossier](docs/tp4-world-generalization.md)).
+- **Concurrent agents contend hard**: with several agents at once, GPU time goes to prefill and decode
+  stalls. Single-user / low-concurrency is the sweet spot today; for multi-tenant serving, vLLM or SGLang
+  on the same hardware remain the safer choice.
 - The checkpoint is uncensored/abliterated; behavior is the checkpoint's, not the engine's.
 
 ## What the overlay changes

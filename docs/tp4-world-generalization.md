@@ -138,6 +138,24 @@ untested above world=2; NCCL is the safe default.
   identical requests *without* a system message hit 0% by design. Clients that want hits must pin one
   stable system prompt. Watch `curl :8000/metrics | grep tensorfold_health:` (`cached_tokens_total`).
 
+### 6.1 Field observation: warm-up lag and multi-agent contention (operator report)
+
+Two behaviors from real agent traffic on this stack — self-observed over days of daily use, mechanism not
+pinned down yet, reported as-is:
+
+- **The prefix cache warms up late.** The first 2–3 turns of a conversation never hit the kept-prompt
+  cache; hits start from roughly the third turn onward. This looks exactly like the vLLM symptom of a KV
+  pool too small and evicting other sessions — but the 8,077,312-token pool behaves the same way, so pool
+  size is not the cause. Kept-prompt checkpoints appear to lag the live conversation by a couple of turns.
+- **Concurrent agents contend hard.** With several agents running at once, GPU time is dominated by
+  prefill and decode stalls; sessions visibly push each other around, and per-session throughput drops
+  faster than on our vLLM TP4 stack on the same ring.
+
+Practical read: TensorFold (this overlay included) is at its best with **one user and a few sessions** —
+exactly the interactive case TP2/TP4 was shaped for, and there it is excellent. For multi-tenant,
+many-agent serving, vLLM or SGLang on the same hardware remain the safer choice today. If you deploy
+this, benchmark it against your own concurrency pattern first.
+
 ## 7. Deployment notes that cost us time
 
 - **Overlay mount path must keep the `tensorfold` layer**: host layout
