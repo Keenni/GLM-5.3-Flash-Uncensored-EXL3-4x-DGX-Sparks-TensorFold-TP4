@@ -1,0 +1,30 @@
+# NOTICE
+
+This repository contains original work and third-party software with the following license boundaries.
+
+## Our work
+
+The files under `overlay/tensorfold/` (the TP4 world-generalization), `scripts/`, `docs/`, and this
+repository's metadata are original work, licensed under the Apache License 2.0 ([LICENSE](LICENSE)).
+
+The files under `overlay/tensorfold/` are modifications of TensorFold v0.6.0 files (Apache-2.0, and MIT for
+code written before v0.6.0); the TensorFold code they modify or quote as context stays under TensorFold's
+licenses.
+
+## Third-party components
+
+| Component | Where | License | Notices |
+|---|---|---|---|
+| TensorFold v0.6.0 (verbatim source) | `baseline/tensorfold/` | Apache-2.0 (MIT for pre-v0.6.0 code) | `baseline/tensorfold/LICENSE`, `baseline/tensorfold/NOTICE`, `baseline/tensorfold/THIRD_PARTY_NOTICES.md` |
+| MiaAI-Lab TP2 stack & container image | used from `ghcr.io/miaai-lab/glm-5.3-flash-exl3-2x-dgx-sparks-tensorfold`, not redistributed here | Apache-2.0 (her repo) | see her repository's `LICENSE` / `NOTICE` |
+| Switchless NCCL 2.30.7 (library used at runtime) | built per [alexellis/switchless-nccl](https://github.com/alexellis/switchless-nccl), not redistributed here | Apache-2.0 | NVIDIA NCCL license + third-party notices ship with that project's release bundle |
+| GLM-5.3-Flash model | [zai-org/GLM-5.3-Flash](https://huggingface.co/zai-org/GLM-5.3-Flash) | see model card | weights not included in this repository |
+| EXL3 checkpoint | [neko-legends/GLM-5.3-Flash-Uncensored-EXL3](https://huggingface.co/neko-legends/GLM-5.3-Flash-Uncensored-EXL3) | ShapleyMcg License 1.0 (attribution required) | full attribution text in [CREDITS.md](CREDITS.md) |
+| DFlash2 drafter | [incoai/GLM-5.3-Flash-DFlash2](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2) | CC BY-NC-ND 4.0 | weights not included; download from source |
+| ExLlamaV3 EXL3 format | upstream of TensorFold | MIT | via `baseline/tensorfold/THIRD_PARTY_NOTICES.md` |
+| Hugging Face transformers (GLM modeling code) | upstream of TensorFold | Apache-2.0 | via `baseline/tensorfold/THIRD_PARTY_NOTICES.md` |
+| z-lab/dflash (DFlash2 architecture) | upstream of TensorFold | MIT | via `baseline/tensorfold/THIRD_PARTY_NOTICES.md` |
+| b12x RoCEnante transport (in TensorFold's RoCE path) | upstream of TensorFold | Apache-2.0 | via `baseline/tensorfold/THIRD_PARTY_NOTICES.md` |
+| NVIDIA PyTorch container (image base) | `nvcr.io/nvidia/pytorch:26.07-py3` | NVIDIA Software License Agreement | container's own notices |
+
+No model weights, drafter weights, or prebuilt NCCL binaries are redistributed in this repository.

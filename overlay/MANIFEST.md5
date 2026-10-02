@@ -1,0 +1,9 @@
+b7e209b9ae94cc41c435b3d45b736cb1 ./tensorfold/cli.py
+09c6de5093d700c0b5e9aa335f319c56 ./tensorfold/cli_args.py
+e163d59f4ae4941720647bcefd6f8b1b ./tensorfold/families/glm5_next/__init__.py
+5d410119dbb4b5e600d8e5db8c427863 ./tensorfold/families/glm5_next/cuda/engine.py
+49be39e0b1805dc74a0961fa8458250c ./tensorfold/families/glm5_next/cuda/hcsplit.py
+f97c8faa3c2215d96ccf4e41446f7bae ./tensorfold/families/glm5_next/cuda/multi.py
+217b1b50a9fee44ea285091b07904644 ./tensorfold/families/glm5_next/cuda/segments.py
+bc2264cdaf7e0ef2e5c255a3ee8e6375 ./tensorfold/families/glm5_next/cuda/split.py
+266433e1ded5e125944a1c0d90c0eb3b ./tensorfold/families/glm5_next/cuda/weights.py
