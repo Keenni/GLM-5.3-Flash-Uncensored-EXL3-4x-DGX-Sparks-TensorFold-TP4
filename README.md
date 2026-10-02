@@ -87,6 +87,11 @@ Known shape of the stack, so nobody is surprised:
 | `cuda/multi.py` | rank-0 async share / all-gather receive buffers `2 *` → `world *` |
 | `cuda/segments.py` | `MAX_SEGS` 4 → 6 |
 
+Note on parallelism: stock TensorFold v0.6.0 serves GLM-5.3-Flash **one request at a time** (its README:
+"GLM and Nemotron CUDA serve one request at a time"). Multi-stream concurrency for GLM is Mia's patch
+family (0030 multi-stream engine, 0040 deadlock fixes, 0041 ring base, 0049 multi-prefill, plus the
+multi-KDA/DFlash2/DSA kernel paths), capped at `PARALLEL_MOST = 4`. Our overlay only raises that cap to 6.
+
 Three failures cost us two boots each before the stack came up; they are documented in detail with the
 exact symptoms in [docs/tp4-world-generalization.md](docs/tp4-world-generalization.md):
 

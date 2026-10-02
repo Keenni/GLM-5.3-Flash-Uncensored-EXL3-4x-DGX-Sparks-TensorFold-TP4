@@ -24,6 +24,10 @@ overlay generalizes it; the full edit list:
 | `cuda/multi.py` | rank-0 async `_share` (both length and values buffers) and `_time_rows` all-gather receive buffers `2 *` → `world *` |
 | `cuda/segments.py` | `MAX_SEGS` 4 → 6 (parity with the production TP2 tuning) |
 
+Where concurrency comes from: stock upstream serves GLM one request at a time. Mia's patch family
+(0030/0040/0041/0049 + multi-KDA/DFlash2/DSA paths) introduced `--parallel` for GLM with `PARALLEL_MOST = 4`;
+this overlay generalizes her machinery to world 4 and raises the cap to 6.
+
 Already world-safe in stock v0.6.0 (verified, do not touch): `cuda/comm.py` (NCCL all-gather/exchange/
 ready/TCPStore), `forward.gather`, `glue.residual_add`, decode top-k gather, `capacity.gather_ints(world)`,
 `multi.py`'s own drafter paths via `self.world`, the `.cu`/`.cpp` kernels (no recompile, caches stay valid).
