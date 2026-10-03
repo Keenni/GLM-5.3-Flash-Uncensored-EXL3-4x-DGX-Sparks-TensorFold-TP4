@@ -1,11 +1,12 @@
 # Credits
 
-This repository is a thin layer: a world-generalization overlay for TensorFold, four-node tooling, and
-documentation. Almost everything that makes it work was built by others.
+This repository is a layer on top of others' work: a world-generalization overlay and v0.6.2 rebase for
+TensorFold, four-node tooling, and documentation. Almost everything that makes it work was built by others.
 
-Our own work (the `overlay/` TP4 world-generalization, the `scripts/` four-node tooling, and the docs) is
-licensed under the Apache License 2.0 ([LICENSE](LICENSE)); [NOTICE](NOTICE) carries the third-party notices
-that go with it.
+Our own work (the `overlay/` TP4 world-generalization, the TensorFold **v0.6.2 rebase** of Mia's patch
+family, the cross-session cache-eviction and prefill fixes, the `scripts/` four-node tooling, and the
+docs) is licensed under the Apache License 2.0 ([LICENSE](LICENSE)); [NOTICE](NOTICE) carries the
+third-party notices that go with it.
 
 ## Model
 
@@ -62,6 +63,12 @@ that go with it.
   [docs/tp4-world-generalization.md](docs/tp4-world-generalization.md)).
 - The 2-rank TP2 variant of this deployment ran on our fleet for a week before the TP4 work, and her
   choice of `PARALLEL_MOST` and segment counts was kept where it made sense at TP4.
+- **The current production line rebases all 53 of her patches onto TensorFold v0.6.2** (upstream's
+  v0.6.1/0.6.2 engine overhaul invalidated the original patch surface). 51 patches are carried through —
+  two were superseded by v0.6.2 equivalents and one was re-implemented against the new engine structure
+  — with the rulings and evidence in [docs/v062-rebase.md](docs/v062-rebase.md). Her patch *logic* is
+  carried through unmodified; the porting omissions we introduced and fixed are documented in the same
+  dossier and are ours, not hers.
 
 ## Switchless NCCL
 
@@ -89,10 +96,18 @@ set that makes TensorFold's comm path work on a four-node switchless ring, valid
 
 ## Ideas
 
-- **[TensorFold PR #159](https://github.com/ashhart/TensorFold/pull/159)** by drowzeys: an independent
-  TP4 route (a separate `glm_moe_dsa` family for a 753B-class model). We read its `--tp4` CLI/comm approach
-  for orientation but did **not** port its code; our overlay generalizes the existing `glm5_next` family
-  instead.
+- **[TensorFold PR #159](https://github.com/ashhart/TensorFold/pull/159)** by drowzeys (branch
+  `glm-moe-dsa-tp4`): an independent TP4 route — a separate `glm_moe_dsa` family for a 753B-class model,
+  built on v0.6.1. It is **not a porting source for `glm5_next`** (its any-K prompt-expert kernels are
+  keyed to a different quantization packing, and its `_TUNED` dense-matmul tables cover paths the
+  `glm5_next` Flash engine never walks — see [docs/prefill-tuning.md](docs/prefill-tuning.md)). What we
+  did take: its `cuda/comm.py` `reduce_scatter` primitive is ported into our tree for future
+  sequence-parallel work, and its prefill design document (sequence-parallel glue via reduce-scatter over
+  rows, per-shape tile tables, chunk sizing) is the methodology we validated against — including as the
+  reference design for *why* a naive W4 hyper-connection split is unsound.
+- Its design docs also state plainly what its family does **not** solve (multi-stream shared-prefix
+  caches, per-stream pre-allocated slots only) — which is why our cross-session cache fixes
+  ([docs/cache-eviction.md](docs/cache-eviction.md)) had no upstream implementation to pull.
 - The KV-pool sizing approach (cap-vs-reserve semantics) follows the upstream
   `TENSORFOLD_MEMORY_RESERVE_GIB` design; the pool numbers in our README are our measurements.
 

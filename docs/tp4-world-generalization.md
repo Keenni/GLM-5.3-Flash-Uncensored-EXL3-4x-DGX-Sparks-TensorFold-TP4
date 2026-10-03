@@ -1,5 +1,11 @@
 # TP4 world-generalization of TensorFold's GLM-5.3-Flash engine
 
+> **Route note (2026-10-04):** this dossier describes the **v0.6.0 overlay route** (our bind-mount
+> generalization over Mia's published image) — kept here because every pitfall in it is still accurate
+> for that tree, and the overlay stays in `overlay/`. The current production line is the **v0.6.2
+> rebase**; see [v062-rebase.md](v062-rebase.md), [cache-eviction.md](cache-eviction.md) and
+> [prefill-tuning.md](prefill-tuning.md).
+
 This is the engineering dossier of the overlay: what stock TensorFold v0.6.0 (as shipped in Mia's 2× Spark
 image) hard-codes about its two-rank world, what we changed, and — more usefully to the next person — how
 the three multi-day failures announced themselves and how to recognize them in minutes instead.
