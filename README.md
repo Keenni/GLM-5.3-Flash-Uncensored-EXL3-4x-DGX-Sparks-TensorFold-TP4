@@ -58,18 +58,20 @@ benchmark suite — treat them as orientation, not a leaderboard):
 
 | Item | Value |
 |---|---|
-| KV pool at start (current config) | **6,651,904 tokens** shared across streams (single-request cap 1M; `PARALLEL=12`, `CACHE_ENTRIES=128`, `PREFILL_ROWS=4096` — every knob's pool cost is itemized in [docs/v062-rebase.md](docs/v062-rebase.md) and the start script) |
+| KV pool at start (current config) | **6,238,208 tokens** shared across streams (single-request cap 1M; `PARALLEL=12`, `CACHE_ENTRIES=128`, `PREFILL_ROWS=8192` — every knob's pool cost is itemized in [docs/v062-rebase.md](docs/v062-rebase.md) and the start script) |
 | KV pool, v0.6.0 overlay route | 8,077,312 tokens (`CACHE_ENTRIES=64`, `PARALLEL=6`, `PREFILL_ROWS=2048`) |
-| Prefill, cold, all-new content | **~800 tok/s** with our patches (vs ~700 tok/s native baseline; 7,615 tok → 806, 5,719 tok → 803) |
-| Prefill reference | our vLLM TP4 NVFP4 stack on the same ring: ~2.0k tok/s — TensorFold TP4 prefill remains the weak side, decode is the strong side |
+| Prefill, cold, all-new content | **~1,600 tok/s** with our patches (vs ~700 tok/s native baseline; 16k prompt → 1,575 tok/s / 10.16 s; 8,192-row chunk → 1,654 tok/s) |
+| Prefill reference | our vLLM TP4 NVFP4 stack on the same ring: ~2.0k tok/s — within ~1.2× now, after the v19 prompt-kernel restoration and the fixed HC row-split ([docs/prefill-tuning.md](docs/prefill-tuning.md)) |
 | Decode, single stream, prose | ≈ 80+ tok/s, ~**1.5×** our vLLM TP4 NVFP4 baseline (self-timed) |
 | Prefix cache, shared system prompt | 2nd conversation hit 1,984/2,035 tokens (97.5%), TTFT 1.8 s → 0.2 s |
 | Prefix cache, returning to a 5-turn-old conversation | **43,904 cached tokens in 7.94 s** (was: full 66 s re-prefill — see [docs/cache-eviction.md](docs/cache-eviction.md)) |
 
 Known shape of the stack, so nobody is surprised:
 
-- **Decode is the strong side; prefill is the weak side** (~2.5× behind vLLM TP4 NVFP4 on the same ring;
-  closing it means kernel work, not configuration — see [docs/prefill-tuning.md](docs/prefill-tuning.md)).
+- **Decode remains the strong side; prefill closed most of the gap** (~1.6k vs ~2.0k tok/s on the same
+  ring). The two wins were kernel-level: restoring Mia's v19 prompt-expert kernel for MoE prefill
+  (7.2× on the dominant block) and the root-caused, bit-exact W4 hyper-connection row-split —
+  see [docs/prefill-tuning.md](docs/prefill-tuning.md).
 - **Cross-session cache eviction is fixed** (this repository's fixes); multi-stream decode contention is
   physics, and heavy concurrent agents still stall each other — fine for a handful of interactive streams.
 - **Prefix cache hits require a stable, shared system prompt** (kept-prompt semantics), and warm up over
@@ -84,14 +86,19 @@ Known shape of the stack, so nobody is surprised:
    clean v0.6.2 tree (51 applied, 2 superseded/dropped with evidence), plus the 4-rank generalization
    ported in. `git merge-file --diff3` against the production tree as the systematic port check; four
    static verification gates + a real boot as the final arbiter (`py_compile` passing means nothing).
-2. **Cache eviction fixes**: three kept-prompt eviction paths destroyed *other* sessions' cached state —
-   an idle few minutes cost a 26–66 s full re-prefill even with nobody competing for memory. Fixed at the
-   engine level and in the extent manager; verified with a controlled A→B→A replay (66 s → 7.94 s).
+2. **Cache eviction fixes**: four kept-prompt eviction paths destroyed other sessions' (or the session's
+   own) cached state — an idle few minutes cost a 26–85 s full re-prefill even with nobody competing for
+   memory. Fixed at the engine level and in the extent manager (including evict-before-compact on the
+   fragmented pool); verified with controlled A→B→A replays (66 s → 7.94 s; a 136k session surviving
+   interleaved load with zero evictions).
    [`docs/cache-eviction.md`](docs/cache-eviction.md)
-3. **Prefill**: one-shot sparse (bit-exact), a small kernel patch lifting the GB10 shared-memory row
-   ceiling (2,812 → 4,096+ rows per chunk via an L2 fallback), and the concurrency policy constant raised
-   6 → 12. The hyper-connection row-split we *removed* after our W4 port produced deterministic garbage
-   on long prompts despite passing every check we had — full postmortem in
+3. **Prefill ~700 → ~1,600 tok/s**, in order of impact: routing MoE prefill back to Mia's v19
+   prompt-expert kernel (the rebase had wired it to the shared decode-shaped kernel — 7.2× on the block
+   that was 51% of prefill), the root-caused and re-enabled hyper-connection row-split at W4
+   (bit-exact, +16%), one-shot sparse (bit-exact), the GB10 shared-memory row-ceiling lift (2,812 →
+   8,192 rows via an L2 fallback), and the concurrency policy constant raised 6 → 12. The row-split's
+   first round *did* produce deterministic garbage on long prompts despite passing every check we had —
+   root cause and postmortem in
    [`docs/prefill-tuning.md`](docs/prefill-tuning.md).
 
 ## What the overlay changes (v0.6.0 route)

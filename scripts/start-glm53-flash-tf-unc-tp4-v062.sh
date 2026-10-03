@@ -8,27 +8,43 @@
 #   权重平铺 /models 直读 / 端口 8000 / master 恒 dgx03 / worker-first 3→2→1→0 /
 #   内存 gate / restart=no / refit 降窗重试 / 烟测验收 / 只清理自己的容器
 #
-# ── 当前档(2026-10-04 修订, 实测 prefill ~800 tok/s; 此前原生 ~700) ──
-#   par=12 · ENTRIES=128 · PREFILL_ROWS=4096 · SPARSE_ONEPASS=1 · HC_SPLIT=0
-#   → 池子 6,651,904 tok (单请求上限 1M)
-#   三项生效点: ① PREFILL_ROWS>2812 的行数上限解除(内核装不下时改读 L2, skill §10.5)
-#              ② SPARSE_ONEPASS=1 (bit-exact, 烟测 sha 694aab7656bc 未变)
-#              ③ PARALLEL_MOST 6→12(§10.6, 代码里的政策上限)
-#   ⚠ HC_SPLIT 已摘除(§10.9): 上游口径是 two-rank 功能, 我们的 W4 版无规范、确定性乱答
+# ── 当前档(2026-10-04 修订) ──
+#   ★ prefill 实测: 37k 冷预填 48.2s → 26.8s (~1300 tok/s); 8192行chunk 793 → 1426 tok/s (+80%)
+#     来源: 把 MoE 的 EXL3 路径接回 Mia 的 v19 prompt 内核(exl3_mm.routed) —— rebase 时被接到共享
+#     decode 形状内核上了, 那块占 prefill 51%、实测换回后快 7.2x(见 skill §10.10)
+#     新瓶颈 = 通信: moe: all-gather 23% + kda: out + all-gather 20% (≈43%)
+
+#   par=12 · ENTRIES=128 · PREFILL_ROWS=8192 · SPARSE_ONEPASS=1 · FILL_SHARE=0.3
+#   ★ HC_SPLIT=1 + HC_EXCHANGE=gather：W4 行切分已修好并验收(bit-exact + 提速, 见下)
+#   → 池子 ~6.65M tok (单请求上限 1M; 随启动时 MemAvailable 抖动几千)
+#   其余生效点: ① PREFILL_ROWS>2812 的行数上限解除(内核装不下时改读 L2, skill §10.5)
+#              ② SPARSE_ONEPASS=1 (bit-exact)   ③ PARALLEL_MOST 6→12(§10.6, 代码里的政策上限)
+#              ④ FILL_SHARE=0.3 (有解码在跑时预填让位; 空载不参与, 见 §10.7 附近说明)
+#              ⑤ PREFILL_ROWS=8192 (池子因此降到 ~6.2M tok)
+#   ✅ 缓存修复(tp4k, skill §9.5): multi.py 的 _room/_grow 改为「先无损 compact, 再淘汰 kept」
+#      —— 原代码在池子碎片化时会先杀掉 kept(实测能白干 84.71s 重预填), 整理只做 MOVE 内容不动。
+#      验证: 会话养到 13.6 万 tok → 插 3 个小请求 + 并行会话 → 回会话 cached=136832/136885 prefill=0.16s, EVICT=0。
+#   HC_SPLIT(W4 行切分) 现役: 2026-10-04 修复根因(partial() 旧分支只填 1/4 行就 return, 正确版成死代码)
+#     修后三条固定 prompt 的 sha 与不分片基准逐位一致(370501976a66 / a99b19fa58c8 / a99b19fa58c8)
 #     (长 prompt 不听指令/续写噪声; 不报错、烟测也查不出)。四 rank 正确做法 = drowzeys
 #     docs/design/glm-moe-dsa-prefill.md §10-02 的 reduce-scatter over rows + 自身行 glue
 #     (仅 +8~12%), 要在 forward.py 的 reduce 点重写, 不是一个 flag。
-#   验证纪律: 改完必须跑「可验证问答电池」(短/中/长 prompt 各一 + 结尾指令), 光看烟测 sha 不够。
+#   🔍 TF_GLM_TRACE_KEEP=1 目前开着(临时诊断, 见下方 TF_ENVS): 每请求打 RESUME HIT/MISS、
+#      ROOM placed/compacting、EVICT why=... 便宜, 用来抓「缓存再被扫」的确切原因;
+#      长会话稳定温热几天后摘掉即可(删那一行 + 重启)。
+#   验证纪律: 改完必须跑「可验证问答基准电池」(短/中/长 prompt 各一 + 结尾指令), 光看烟测 sha 不够。
 #
-# 依赖(四台都要): 镜像 tensorfold-glm53:v0.6.2-tp4j (本地构建, 四台 ID 各自不同内容相同)
+# 依赖(四台都要): 镜像 tensorfold-glm53:v0.6.2-tp4 (本地构建, 四台 ID 各自不同内容相同)
 #   /models/GLM-5.3-Flash-Uncensored-EXL3 (92 shard) + /models/GLM-5.3-Flash-DFlash2
 #   /root/nccl-switchless/libnccl.so.2 (switchless 补丁 NCCL 2.30.7)
 #   内核缓存 /root/tf-kernel-cache/glm53-tf-unc-tp4-v062 (含 exl3 linear_v5/experts_v2/prompt_experts_v1)
 #
 # 用法: 只在 dgx03 执行:  bash /root/start-glm53-flash-tf-unc-tp4-v062.sh
 #       停:  bash /root/stop-glm53-flash-tf-unc-tp4-v062.sh   (master-first)
-# 回滚:  镜像 v0.6.0(旧生产) / v0.6.2-tp4f(移植层基座) 都在；
-#        本脚本改动前备份  start-glm53-flash-tf-unc-tp4-v062.sh.bak-prefill-20261004
+# 回滚:  镜像链 v0.6.0(旧生产) → v0.6.2-tp4(基座) → v0.6.2-tp4f(drowzeys 移植层)
+#   实测: 8192 行 chunk 1426 → 1654 tok/s(+16%); 16k 冷预填 1575 tok/s(prefill 10.16s)
+#   细节与下一步(重开 PREFILL_OVERLAP=2)见 skill glm53-flash-tf-tp4 / references/hc-split-w4-*.md
+#        脚本改动前备份  start-glm53-flash-tf-unc-tp4-v062.sh.bak-prefill-20261004
 # 红线: 本脚本不替用户停任何在跑生产容器；:8000 被占即 die 并提示先跑 TP2 的 stop 脚本。
 # =====================================================================
 set -euo pipefail
@@ -45,12 +61,12 @@ H1="root@192.168.89.103"        # dgx03 (rank0 + API, master)
 W1="root@192.168.89.104"        # dgx04 (rank1)
 W2="root@192.168.89.101"        # dgx01 (rank2)
 W3="root@192.168.89.102"        # dgx02 (rank3)
-IMAGE="tensorfold-glm53:v0.6.2-tp4j"
+IMAGE="tensorfold-glm53:v0.6.2-tp4"
 KCACHE="/root/tf-kernel-cache/glm53-tf-unc-tp4-v062"   # 每机各自编译缓存(与 TP2 的目录分开)
 NCCL_PATCH="/root/nccl-switchless"
 NCCL_IN_CONTAINER="/opt/patched-nccl"
 TF_PKG="/usr/local/lib/python3.12/dist-packages/tensorfold"   # 容器内 TF 包根
-# Mia TP2 现役档全量透传；TP4 差异: COMM=nccl(补丁栈)。HC_SPLIT 已泛化到 W4 并验证(此前"是 2-rank 机制"的说法已废)
+# Mia TP2 现役档全量透传；TP4 差异: COMM=nccl(补丁栈)。HC_SPLIT 已泛化到 W4 并验收(bit-exact)
 CONTEXT=1048576
 PARALLEL=12
 KV=fp8
@@ -67,20 +83,26 @@ TF_ENVS=(
   TF_GLM_COPY_DRAFTS=1
   TF_GLM_COPY_MAX=15
   TF_GLM_DFLASH_POLICY=$DRAFT_POLICY
-  TF_GLM_HC_SPLIT=0                # ⚠ 摘掉: 上游口径是 two-rank 功能, 我们的 W4 版无规范、会确定性乱答(见 skill §10.9)
-  TF_GLM_PREFILL_OVERLAP=0         # ⚠ 同上(依赖 HC_SPLIT)
+  TF_GLM_HC_SPLIT=1
+  TF_GLM_HC_EXCHANGE=gather
+  TF_GLM_PREFILL_OVERLAP=0
   TF_GLM_KDA_CHUNKED=1
   TF_GLM_SPARSE_ONEPASS=1         # ✓已验证 bit-exact: 单遍 sparse MLA prompt(省 chunk 程序与合并)
-  TF_GLM_PREFILL_ROWS=4096         # item 2 ✓已验证: 曾爆分组内核 smem(4096行=147456B > GB10 101248B);
-                                   # 现内核装不下时改读 L2, 行数上限解除(实测 8075tok 请求 = 4096 行 chunk, 0 报错)
+  TF_GLM_PREFILL_ROWS=8192         # item 2 ✓: 曾爆分组内核 smem(4096行=147456B > GB10 101248B); 内核已改为
+                                   # 装不下读 L2, 上限解除, 故从 4096 推到 8192(代价: 池子会缩, 看启动 estimate)
   TF_GLM_WIDE_GRAPHS=16
   TF_GLM_COPY_REPLY_MATCH=16
   TF_GLM_MULTI_LONE=1
   TF_GLM_MULTI_PREFILL=1
+  TF_GLM_PROFILE=1                  # 逐 block 计时(带 device sync)+内存, 每个 prompt chunk 打一次:
+                                    # 看 prefill profile / prefill memory 两行; 会拖慢计时, 优化完可摘
+  TF_GLM_FILL_SHARE=0.3            # 有解码在跑时预填让位的比例(默认 0.5): 0.3 = 更保解码平滑;
+                                   # 空载无解码时该值不参与(每轮都直接发预填, 不拖慢)
   TF_GLM_L2PF=1
   TF_GLM_EXL3_LOADS=nc
   TF_GLM_SHARED_PREFIX=1
   TF_GLM_CACHE_ENTRIES=128
+  TF_GLM_TRACE_KEEP=1                  # 临时诊断: 打印 ROOM/EVICT/GROW/HOME-MOVE/TAKEOVER-SKIP 轨迹
   TF_GLM_CACHE_GIB=1000                # 不封顶: 池由 MemAvailable(启动时)-RESERVE 自动算, engine 夹到 (budget-estimate)
   TENSORFOLD_MEMORY_RESERVE_GIB=14.5   # 上游值: 1M prompt 峰值(比 estimate 多 ~10GiB)留 ~4.5GiB 余量
   TF_GLM_MTP=auto

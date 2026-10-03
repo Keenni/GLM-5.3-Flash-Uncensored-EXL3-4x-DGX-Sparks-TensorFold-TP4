@@ -1,9 +1,11 @@
 # Cross-session cache eviction: why conversations kept wiping each other's prefix cache
 
-**One-line conclusion:** under concurrent streams, TensorFold's kept-prompt eviction had three paths that
-destroyed *other* sessions' cached state — an idle few minutes cost a full re-prefill (26–66 s) even with
-nobody competing for memory. After the fixes, returning to a 5-turn-old conversation re-hits
-43,904 cached tokens in 7.9 s instead of re-prefilling for 66 s.
+**One-line conclusion:** under concurrent streams, TensorFold's kept-prompt eviction had four paths that
+destroyed *other* sessions' cached state (or the session's own, on a fragmented pool) — an idle few
+minutes cost a full re-prefill (26–66 s, one case 84.7 s) even with nobody competing for memory. After
+the fixes, returning to a 5-turn-old conversation re-hits
+43,904 cached tokens in 7.9 s instead of re-prefilling for 66 s; a 136k-token session survives
+interleaved small requests and a parallel session with zero evictions.
 
 ## 1. Symptoms (all reproduced on the live stack)
 
@@ -97,7 +99,31 @@ Post-fix trace: `TAKEOVER-SKIP in-place: 5 kept would die (longest=43904), copyi
 `HOME-MOVE extent=1 base=0 -> 53248`, `RESUME prompt=49433 kept=8 -> HIT ids=43904`; `EVICT
 why=takeover|home` counts go to **zero**, no errors.
 
-## 5. Context: why there is nothing upstream to copy
+## 5. Bug 4 — `_room`/`_grow` evict first, compact later (2026-10-04)
+
+Even with §3's fixes, a warm session could still drop its cache with **nobody competing**: a session at
+`prompt=89,922 / cached=89,280` took a small 258-token request, and the next turn hit only **31,936**
+(exactly the first-turn length) — a 52,779-token / **84.7 s** re-prefill.
+
+The mechanism: the pool allocator hands out **contiguous** rows, so `_room(need)` needs a free span of
+`need` rows; when `pool.place` fails it walks kept prompts and evicts them (LRU) — and only *then* runs
+the lossless `_compact()` (pure `MOVE`s, contents untouched). So a merely **fragmented** pool — plenty of
+free rows, no contiguous span — got "solved" by killing kept prompts that a shuffle would have saved.
+`_grow` has the same eviction-loop-before-compact shape. (`PARALLEL 6→12` and `PREFILL_ROWS 2048→4096`
+both increase fragmentation, which is why this only surfaced once those went in.)
+
+**Fix:** run `_compact()` *before* the eviction loop, gated on whether compaction can actually satisfy the
+request (`free_rows() >= need`, resp. `free_rows()+x.size >= size`); the trace now distinguishes
+`compacting (before any eviction)` from `(after evictions)`. Rule of thumb that generalizes: **on a
+contiguous-row allocator, "there is space" ≠ "it fits" — lossless rearrangement always comes before
+killing anything.**
+
+Verification (`repro_cache{,2}.py`): a session grown to 79,808 kept tokens survives two interleaved small
+requests (`cached=79808, prefill=0.17 s` on return); a session grown to **136,832** survives three small
+requests *plus* a parallel session B and returns at `cached=136,832/136,885, prefill=0.16 s`. Both runs:
+**EVICT=0**, small requests logged `ROOM placed need=2048` directly.
+
+## 6. Context: why there is nothing upstream to copy
 
 TensorFold's other TP4 effort (drowzeys' PR #159, the `glm_moe_dsa` family) states in its design docs that
 shared-prefix caches and multi-stream caches are **explicitly deferred** — its streams get fixed, up-front
