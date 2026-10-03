@@ -1,10 +1,16 @@
 # Prefill: what the knobs do, what we patched, and an HC-split postmortem
 
-**One-line conclusion:** TensorFold GLM prefill at ~700 tok/s on a 4-rank GB10 ring is the *native
-baseline*, not a defect — the other TP4 effort (drowzeys) measured the same numbers on v0.6.1. With three
-changes (one-shot sparse, a chunk-size kernel patch, higher concurrency) we sit at **~800 tok/s**, with
-the decode side unchanged. The one big lever we tried and **removed** was the hyper-connection row-split
-(HC_SPLIT): our W4 port passed every check we had and still produced deterministic garbage.
+**One-line conclusion:** TensorFold's prefill on our Flash stack starts at ~700 tok/s on long prompts (our
+own measurements, below) — the native baseline, not a defect. With three changes (one-shot sparse, a
+chunk-size kernel patch, higher concurrency) we sit at **~800 tok/s**, with the decode side unchanged. The
+one big lever we tried and **removed** was the hyper-connection row-split (HC_SPLIT): our W4 port passed
+every check we had and still produced deterministic garbage.
+
+> ⚠ **What the numbers are *not*: the other TP4 effort's benchmarks.** drowzeys' PR #159 works on a
+> **different model** — the 753B GLM-5.3 (`glm_moe_dsa` family), not this Flash checkpoint. Its prefill
+> numbers (native and optimized alike) describe a different model with a different compute profile and do
+> **not** serve as our baseline or our ceiling. What transfers from that work is *methodology* (which
+> kernels matter, how to sequence-parallelize glue, how to grade chunk sizes), not numbers.
 
 Current production knobs (see `scripts/start-glm53-flash-tf-unc-tp4-v062.sh`):
 
@@ -15,14 +21,17 @@ Current production knobs (see `scripts/start-glm53-flash-tf-unc-tp4-v062.sh`):
 | `PARALLEL` (engine `PARALLEL_MOST`) | 12 | ✅ verified, kept — policy constant, see §3 |
 | `TF_GLM_HC_SPLIT` / `TF_GLM_PREFILL_OVERLAP` | 0 / 0 | ❌ removed — see §4 |
 
-## 1. The baseline is upstream, not a regression
+## 1. The baseline is ours, measured on this stack
 
-Cold-prefill measurements on our stack: 49,985 tok → 677 tok/s; 93,237 tok → 699 tok/s; 200,086 tok →
-699 tok/s. drowzeys' independent measurements on v0.6.1: 726 / ~773 / 717 / 497 tok/s at 4K–128K. Same
-league. Their optimization campaign (indexer top-k radix-select, per-shape prompt-GEMM tiles,
-UnpackCache, 8192-row chunks, sequence-parallel glue) brought *their* family to ~1000–1100 tok/s — by
-**writing kernels**, not by configuring. That set our expectations correctly: anything on our path is
-kernel engineering too.
+Cold-prefill measurements on our own Flash stack, engine-side, before any of the changes below: 49,985
+tok → 677 tok/s; 93,237 tok → 699 tok/s; 200,086 tok → 699 tok/s. That is the starting point these
+patches are measured against — there is no upstream benchmark for this model on this hardware to compare
+with (see the warning above: drowzeys' numbers belong to the 753B family).
+
+Their optimization campaign (indexer top-k radix-select, per-shape prompt-GEMM tiles, UnpackCache,
+8192-row chunks, sequence-parallel glue) is still the best available map of *which kernels matter* — but
+the relative gains they report were measured on their model and only transfer as hints. What their work
+establishes beyond doubt is the *kind* of effort required: writing kernels, not configuring.
 
 `TF_GLM_PROFILE=1` gives per-block timing with device sync (diagnostic only — it perturbs timing and
 needs a restart; do not run it in production config).
