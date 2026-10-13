@@ -135,6 +135,23 @@ the exact symptoms in [docs/tp4-world-generalization.md](docs/tp4-world-generali
    the startup calibration path, which dies first with a one-line `all_gather: recv must hold world x send`
    and no traceback. A static self-check for stragglers is in the docs.
 
+## The v0.6.7 unified image (current production)
+
+Both lines now run one self-patched image, `tensorfold-glm53:v0.6.7` (the v0.6.2 rebase lineage above,
+plus: a memory janitor daemon, the spill tier for evicted kept prompts, system-block checkpoints, the
+vision prefix-reuse fix baked in, and `--alias`/`--name-priority` for foreground/background split) —
+**no bind-mount overlays**. The start/stop scripts are in `scripts/`:
+
+- `start-glm53-flash-tf-unc-tp4-v067.sh` / `stop-...` — the TP4 production pair (run once on the
+  master; the script starts all four ranks worker-first and refuses to touch any other container).
+- The TP2 production pair on the same image lives in the companion repository
+  [GLM-5.3-Flash-Uncensored-EXL3-2x-DGX-Sparks-TensorFold-TP2](https://github.com/Keenni/GLM-5.3-Flash-Uncensored-EXL3-2x-DGX-Sparks-TensorFold-TP2)
+  — together with the world=2 row-split root cause, the TP2 tuning A/B table and the 2-rank NCCL
+  configuration for a direct CX7 link.
+
+⚠️ The v0.6.7 tag is content-forked across machines if you patch one copy and not another: verify by
+`docker run --rm --entrypoint md5sum <image> <path>` per file, not by tag.
+
 ## Repository layout
 
 ```
