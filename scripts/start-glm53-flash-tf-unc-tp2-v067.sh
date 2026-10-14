@@ -58,6 +58,10 @@ NCCL_IN_CONTAINER="/opt/patched-nccl"
 TF_PKG="/usr/local/lib/python3.12/dist-packages/tensorfold"   # 容器内 TF 包根
 SPILL_DIR="/root/glm53-spill-tp2-v067"   # 与 TP4 的 spill 目录分开, 避免跨 TP 混快照
 SPILL_GIB=240
+# ★2026-10-14 spill 接线 overlay: v0.6.7 的 spill 只接了单流 engine 路径, --parallel 的 multi.py 淘汰不落盘
+#   (实测 30h 目录 0 字节)。此 overlay 给 multi._drop 接上 SpillWriter + _resume 接盘上命中(新 op SPILL_LOAD)。
+#   两台同 md5 部署; 卸载=删掉本目录并去掉下面两行 -v。
+OVERLAY_DIR="/root/tf-overlay-tp2-v067"
 # 除 TP/拓扑外与 TP4 现役逐字一致(对比实验纪律); TP2 差异仅 MEM_GATE_GIB(见下)
 CONTEXT=1048576
 PARALLEL=12
@@ -130,6 +134,8 @@ done
 
 for host in "$H1" "$W1"; do
   h "$host" "test -f $MODEL_DIR/config.json" || die "$host 缺 $MODEL_DIR/config.json"
+  h "$host" "test -f $OVERLAY_DIR/multi.py" || die "$host 缺 $OVERLAY_DIR/multi.py (spill overlay 未部署)"
+  h "$host" "test -f $OVERLAY_DIR/spill.py" || die "$host 缺 $OVERLAY_DIR/spill.py (spill overlay 未部署)"
   n=$(h "$host" "ls $MODEL_DIR/*.safetensors 2>/dev/null | wc -l")
   [[ "$n" == "92" ]] || die "$host 权重 shard 数 $n != 92"
   h "$host" "test -f $DRAFTER_DIR/model.safetensors" || die "$host 缺 DFlash2 drafter"
@@ -196,6 +202,8 @@ launch() {  # $1=rank
               -e TF_NCCL_LIB=$NCCL_IN_CONTAINER/libnccl.so.2)
   h "$host" "docker run -d --name $CONTAINER_NAME ${RUN_ARGS[*]} ${ENV_ARGS[*]} ${nccl[*]} \\
      -v $NCCL_PATCH:$NCCL_IN_CONTAINER:ro -v /models:/models:ro -v $KCACHE:/cache \\
+     -v $OVERLAY_DIR/multi.py:$TF_PKG/families/glm5_next/cuda/multi.py:ro \\
+     -v $OVERLAY_DIR/spill.py:$TF_PKG/families/glm5_next/cuda/spill.py:ro \\
      -v $SPILL_DIR:$SPILL_DIR \\
      $IMAGE tensorfold serve $MODEL_DIR --rank $rank \\
        $( [ "$rank" = 0 ] && echo "--name $SERVED_NAME --host 0.0.0.0 --port $PORT" ) ${SERVE_ARGS[*]}" >/dev/null \

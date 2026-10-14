@@ -71,7 +71,8 @@ KCACHE="/root/tf-kernel-cache/glm53-tf-unc-tp4-v067"   # 每机各自编译缓�
 NCCL_PATCH="/root/nccl-switchless"
 NCCL_IN_CONTAINER="/opt/patched-nccl"
 TF_PKG="/usr/local/lib/python3.12/dist-packages/tensorfold"   # 容器内 TF 包根
-TF_OVERLAY="/root/tf-overlay-tp4"   # 视觉前缀复用补丁挂载目录(四台各持同 md5 的 multi.py)
+TF_OVERLAY="/root/tf-overlay-tp4"   # 运行时补丁挂载目录(四台同 md5): multi.py=v0.6.7 烘焙版(sys-checkpoint/SHARED_SLOTS=3)+2026-10-14 spill 接线
+                                    #   (spill: multi._drop 接 SpillWriter + _resume 接盘上命中/新 op SPILL_LOAD; 旧版备份 multi.py.bak-prespill-20261014)
 SPILL_DIR="/root/glm53-spill-v067"   # #423 spill tier: 被淘汰的对话前缀落盘(每 rank 一份文件, 重启可读回); 2026-10-11 用户令启用
 SPILL_GIB=240                       # 磁盘上限 GiB/rank (用户令 2026-10-11; 1M 会话态≈6.7GB, 88K≈600MB; LRU 内部淘汰)
 # Mia TP2 现役档全量透传；TP4 差异: COMM=nccl(补丁栈)。HC_SPLIT 已泛化到 W4 并验收(bit-exact)
@@ -148,6 +149,8 @@ for host in "$H1" "$W1" "$W2" "$W3"; do
   [[ "$n" == "92" ]] || die "$host 权重 shard 数 $n != 92"
   h "$host" "test -f $DRAFTER_DIR/model.safetensors" || die "$host 缺 DFlash2 drafter"
   h "$host" "test -f $NCCL_PATCH/libnccl.so.2" || die "$host 缺补丁 NCCL $NCCL_PATCH/libnccl.so.2"
+  h "$host" "test -f $TF_OVERLAY/multi.py" || die "$host 缺 $TF_OVERLAY/multi.py (overlay 未部署)"
+  h "$host" "test -f $TF_OVERLAY/spill.py" || die "$host 缺 $TF_OVERLAY/spill.py (spill overlay 未部署)"
   h "$host" "docker image inspect $IMAGE >/dev/null 2>&1" || die "$host 缺镜像 $IMAGE"
   h "$host" "mkdir -p $KCACHE"
   free=$(free_gib "$host")
@@ -213,6 +216,7 @@ launch() {  # $1=rank
   h "$host" "docker run -d --name $CONTAINER_NAME ${RUN_ARGS[*]} ${ENV_ARGS[*]} ${nccl[*]} \
      -v $NCCL_PATCH:$NCCL_IN_CONTAINER:ro -v /models:/models:ro -v $KCACHE:/cache \
      -v $TF_OVERLAY/multi.py:$TF_PKG/families/glm5_next/cuda/multi.py:ro \
+     -v $TF_OVERLAY/spill.py:$TF_PKG/families/glm5_next/cuda/spill.py:ro \
      -v $SPILL_DIR:$SPILL_DIR \
      $IMAGE tensorfold serve $MODEL_DIR --rank $rank \
        $( [ "$rank" = 0 ] && echo "--name $SERVED_NAME --host 0.0.0.0 --port $PORT" ) ${SERVE_ARGS[*]}" >/dev/null \

@@ -25,6 +25,10 @@ This repository contains two routes to four ranks:
 - **The v0.6.0 overlay (historical)** — a ~40-edit bind-mount overlay over Mia's published image,
   kept in `overlay/` with its full pitfall dossier:
   [`docs/tp4-world-generalization.md`](docs/tp4-world-generalization.md).
+- **The v0.6.7 line's spill tier, wired for `--parallel`** — upstream #423 only spills/resumes on the
+  single-stream path; under `--parallel 12` evictions discarded kept prompts entirely (0 bytes in 30 h).
+  Two-file overlay (`overlay-v067/`), same for both stacks:
+  [`docs/spill-parallel-wiring.md`](docs/spill-parallel-wiring.md).
 
 No switch is needed: the four Sparks are cabled in a ring with their ConnectX-7 QSFP ports, and NCCL
 (a patched, ring-only build) talks RoCE over the cables directly.
