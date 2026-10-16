@@ -1,7 +1,8 @@
 <h1 align="center">GLM-5.3-Flash Uncensored EXL3 on 4× DGX Spark — TensorFold TP4</h1>
 
 <p align="center">
-  <sub>Serving GLM-5.3-Flash from four DGX Sparks over a switchless RoCE fiber ring with
+  <sub>English | <a href="README.zh-CN.md">简体中文</a><br><br>
+  Serving GLM-5.3-Flash from four DGX Sparks over a switchless RoCE fiber ring with
   <a href="https://github.com/ashhart/TensorFold">TensorFold</a>:
   a 4-rank generalization of the 2-rank engine, now rebased onto v0.6.2 with our cache and prefill fixes.</sub>
 </p>
